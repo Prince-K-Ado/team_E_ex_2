@@ -1,90 +1,77 @@
-# Concurrency example using multiple implementations
-# Example searches for a topic on wikipedia, gets related topics and 
-#   saves the references from related topics in their own text file
-# info on wikipedia library: https://thepythoncode.com/article/access-wikipedia-python
-# info on concurrent.futures library: https://docs.python.org/3/library/concurrent.futures.html#
-
 import time
 import wikipedia
+import os
+import re
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-#convert objects produced by wikipedia package to a string var for saving to text file
+# --- Helper Functions ---
+
 def convert_to_str(obj):
-  if type(obj) == list:
-    mystr = '\n'.join(obj)
-    return mystr
-  elif type(obj) in [str, int, float]:
+    """Convert object (list, str, int, float) to a string."""
+    if isinstance(obj, list):
+        return '\n'.join(obj)
     return str(obj)
 
-# IMPLEMENTATION 1: sequential example
-def wiki_sequentially():
-  print('\nsequential function:')
-  t_start = time.perf_counter()
-  results = wikipedia.search("general artificial intelligence")
-  
-  def dl_and_save(item):
-    page = wikipedia.page(item, auto_suggest=False)
-    title = page.title
-    references = convert_to_str(page.references)
-    out_filename = title + ".txt"
-    print(f'writing to {out_filename}')
-    with open(out_filename, 'w') as fileobj:
-      fileobj.write(references)
+def safe_filename(name):
+    """Sanitize a string to be safe as a filename."""
+    return re.sub(r'[\\/*?:"<>|]', "", name)
 
-  for item in results:
-    dl_and_save(item)
+def ensure_directory(path="wiki_dl"):
+    """Ensure that the target directory exists."""
+    os.makedirs(path, exist_ok=True)
 
-  t_end = time.perf_counter()
-  t_lapse = t_end - t_start
-  print(f'code executed in {t_lapse} seconds')
+def download_and_save(item):
+    """Download references from a Wikipedia page and save them to a text file."""
+    try:
+        page = wikipedia.page(item, auto_suggest=False)
+        title = safe_filename(page.title)
+        references = convert_to_str(page.references)
+        file_path = os.path.join("wiki_dl", title + ".txt")
+        print(f'writing to {file_path}')
+        with open(file_path, 'w', encoding='utf-8') as fileobj:
+            fileobj.write(references)
+    except Exception as e:
+        print(f"Error processing '{item}': {e}")
 
-# IMPLEMENTATION 2: concurrent example w/ threads
-def concurrent_threads():
-  print('\nthread pool function:')
-  t_start = time.perf_counter()
-  results = wikipedia.search("general artificial intelligence")
-  
-  def dl_and_save_thread(item):
-    page = wikipedia.page(item, auto_suggest=False)
-    title = page.title
-    references = convert_to_str(page.references)
-    out_filename = title + ".txt"
-    print(f'writing to {out_filename}')
-    with open(out_filename, 'w') as fileobj:
-      fileobj.write(references)
+# --- Execution Modes ---
 
-  with ThreadPoolExecutor() as executor:
-    executor.map(dl_and_save_thread, results)
+def run_sequential(results):
+    print("\nRunning sequential...")
+    start = time.perf_counter()
+    for item in results:
+        download_and_save(item)
+    print(f"Done in {time.perf_counter() - start:.2f}s")
 
-  t_end = time.perf_counter()
-  t_lapse = t_end - t_start
-  print(f'code executed in {t_lapse} seconds')
+def run_threads(results):
+    print("\nRunning with ThreadPoolExecutor...")
+    start = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(download_and_save, results)
+    print(f"Done in {time.perf_counter() - start:.2f}s")
 
-# IMPLEMENTATION 3: concurrent example w/ processes
-#  processes do not share memory; multiprocessing and concurrent.futures.ProcessPoolExecutor pickle
-#  objects in order to communicate - can't pickle nested functions so must structure accordingly
-def dl_and_save_process(item): # moved to module level in this example due to processes not sharing memory
-    page = wikipedia.page(item, auto_suggest=False)
-    title = page.title
-    references = convert_to_str(page.references)
-    out_filename = title + ".txt"
-    print(f'writing to {out_filename}')
-    with open(out_filename, 'w') as fileobj:
-      fileobj.write(references)
+def run_processes(results):
+    print("\nRunning with ProcessPoolExecutor...")
+    start = time.perf_counter()
+    with ProcessPoolExecutor() as executor:
+        executor.map(download_and_save, results)
+    print(f"Done in {time.perf_counter() - start:.2f}s")
 
-def concurrent_process():
-  print('\nprocess pool function:')
-  t_start = time.perf_counter()
-  results = wikipedia.search("general artificial intelligence")
-
-  with ProcessPoolExecutor() as executor:
-    executor.map(dl_and_save_process, results)
-
-  t_end = time.perf_counter()
-  t_lapse = t_end - t_start
-  print(f'code executed in {t_lapse} seconds')
+# --- Main Execution Block ---
 
 if __name__ == "__main__":
-  wiki_sequentially()
-  concurrent_threads()
-  concurrent_process()
+    ensure_directory()
+
+    user_input = input("Enter a Wikipedia search term: ").strip()
+    if len(user_input) < 4:
+        print("Input too short, defaulting to 'generative artificial intelligence'.")
+        user_input = "generative artificial intelligence"
+
+    print(f"Searching Wikipedia for '{user_input}'...")
+    results = wikipedia.search(user_input)
+
+    if not results:
+        print("No results found.")
+    else:
+        run_sequential(results)
+        run_threads(results)
+        run_processes(results)
